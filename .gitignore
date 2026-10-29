@@ -1,0 +1,13 @@
+# Local planning documents — do not push
+docs/
+
+# Dependencies and build output
+node_modules/
+.next/
+out/
+
+# Environment and local data (contains secrets and user uploads)
+.env
+.env*.local
+data/
+*.log
