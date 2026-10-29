@@ -7,6 +7,7 @@ import {
   classifyQuestion,
   encodeWav,
   extractSupplierName,
+  isValidOutcome,
   supplierKey,
   comparePrice,
   countWords,
@@ -141,4 +142,13 @@ test("extracts supplier names for cross-check memory", () => {
   assert.equal(extractSupplierName("Harga cabai naik nggak?"), null);
   assert.equal(supplierKey("Toko Sinar Abadi!"), "toko sinar abadi");
   assert.equal(supplierKey("TOKO  Sinar   Abadi"), supplierKey("Toko Sinar Abadi"));
+});
+
+test("validates recorded merchant outcomes", () => {
+  assert.equal(isValidOutcome("bought"), true);
+  assert.equal(isValidOutcome("not_bought"), true);
+  assert.equal(isValidOutcome("undecided"), true);
+  assert.equal(isValidOutcome("maybe_later"), false);
+  assert.equal(isValidOutcome(""), false);
+  assert.equal(isValidOutcome(null), false);
 });

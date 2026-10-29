@@ -68,6 +68,8 @@ export default function Home() {
   const [comparison, setComparison] = useState(null);
   const [comparing, setComparing] = useState(false);
   const [shareNote, setShareNote] = useState("");
+  const [outcome, setOutcome] = useState(null);
+  const [showAudit, setShowAudit] = useState(false);
   const [panelOpen, setPanelOpen] = useState(true);
   const [recording, setRecording] = useState(false);
   const [recordSeconds, setRecordSeconds] = useState(0);
@@ -200,6 +202,8 @@ export default function Home() {
       const data = await response.json();
       if (!response.ok) throw new Error(data.detail || data.error || "failed");
       setResult(data);
+      setOutcome(data.outcome || null);
+      setShowAudit(false);
       await loadHistory();
     } catch {
       setError("Lagi ada gangguan. Pertanyaanmu sudah disimpan, coba lagi sebentar ya.");
@@ -494,6 +498,17 @@ export default function Home() {
     }
   }
 
+  // Record the merchant's final decision for this verdict.
+  async function saveOutcome(value) {
+    if (!result?.verdict) return;
+    await fetch("/api/outcome", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ verdictId: result.verdict.id, outcome: value }),
+    });
+    setOutcome(value);
+  }
+
   async function sendFeedback(helpful) {
     if (!result?.verdict) return;
     await fetch("/api/feedback", {
@@ -508,6 +523,8 @@ export default function Home() {
     const response = await fetch(`/api/queries/${id}`);
     const data = await response.json();
     setResult(data); setFeedbackDone(false); setOpenSource(null);
+    setOutcome(data.outcome || null);
+    setShowAudit(false);
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
@@ -751,6 +768,9 @@ export default function Home() {
             <p className="memory-note">
               Supplier <b>{result.supplierMemory.name}</b> pernah dicek {result.supplierMemory.checkCount}x.
               Terakhir {String(result.supplierMemory.lastCheckedAt || "").slice(0, 10)} statusnya {result.supplierMemory.lastConfidence}.
+              {result.supplierMemory.lastOutcome
+                ? ` Keputusan terakhir lo: ${result.supplierMemory.lastOutcome === "bought" ? "jadi beli" : result.supplierMemory.lastOutcome === "not_bought" ? "nggak jadi" : "belum mutusin"}.`
+                : ""}
             </p>
           ) : null}
           {(verdict.riskFlags || []).map((flag) => <p className="risk" key={flag}>⚠ {flag}</p>)}
@@ -781,6 +801,64 @@ export default function Home() {
             <button disabled={feedbackDone} onClick={() => sendFeedback(false)}>Kurang</button>
             {feedbackDone ? <span className="muted">Makasih ya.</span> : null}
           </div>
+          <div className="outcome-box">
+            <b>Hasil akhirnya gimana?</b>
+            {outcome ? (
+              <p className="muted">
+                Tercatat: {outcome === "bought" ? "Jadi beli / transfer" : outcome === "not_bought" ? "Nggak jadi" : "Belum mutusin"}.
+                <button type="button" className="quiet" onClick={() => setOutcome(null)}>Ubah</button>
+              </p>
+            ) : (
+              <div className="row">
+                <button type="button" onClick={() => saveOutcome("bought")}>Jadi beli</button>
+                <button type="button" onClick={() => saveOutcome("not_bought")}>Nggak jadi</button>
+                <button type="button" onClick={() => saveOutcome("undecided")}>Belum mutusin</button>
+              </div>
+            )}
+          </div>
+          <div className="row">
+            <button type="button" className="quiet" aria-expanded={showAudit} onClick={() => setShowAudit((value) => !value)}>
+              {showAudit ? "Tutup cek buktinya" : "Lihat cek buktinya"}
+            </button>
+          </div>
+          {showAudit ? (
+            <div className="audit-box">
+              <b>Cek bukti di balik verdict ini</b>
+              <p className="muted">
+                Status akhir: {verdict.confidence}. {verdict.confidenceReason}
+              </p>
+              <p className="muted">
+                Sumber ditemukan: {sources.length} · independen: {new Set(sources.map((s) => s.independenceKey || s.publisher)).size}.
+                Minimal 2 sumber independen buat status di atas BUKTI BELUM CUKUP.
+              </p>
+              {(result.citations || []).length ? (
+                <ul>
+                  {Object.values(
+                    (result.citations || []).reduce((acc, citation) => {
+                      const key = citation.claimIndex;
+                      if (!acc[key]) acc[key] = { text: citation.claimText, sources: [] };
+                      const source = sources.find((s) => (s.dbId || s.id) === citation.sourceId);
+                      if (source) acc[key].sources.push(source);
+                      return acc;
+                    }, {}),
+                  ).map((claim, index) => (
+                    <li key={index}>
+                      {claim.text}{" "}
+                      {claim.sources.map((source) => (
+                        <a key={source.dbId || source.id} href={source.url} target="_blank" rel="noreferrer">
+                          [{source.publisher}]
+                        </a>
+                      ))}
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="muted">
+                  Tidak ada klaim yang dirilis sebagai fakta pada verdict ini, jadi tidak ada sitasi yang ditampilkan.
+                </p>
+              )}
+            </div>
+          ) : null}
           <div className="row">
             <a
               className="share-btn"

@@ -177,6 +177,11 @@ button:disabled { opacity: 0.55; cursor: wait; }
 }
 .watch-main { flex: 1; min-width: 0; }
 .watch-detail { margin: 3px 0 0; font-size: 14px; color: var(--muted); }
+.outcome-box, .audit-box {
+  border: 1px solid rgba(120, 130, 115, 0.4); border-radius: 12px;
+  background: rgba(255, 255, 255, 0.55); padding: 12px 14px; margin: 12px 0;
+}
+.outcome-box b, .audit-box b { display: block; margin-bottom: 6px; }
 .memory-note {
   border: 1px solid rgba(120, 130, 115, 0.4); border-radius: 10px;
   background: rgba(255, 255, 255, 0.55); padding: 9px 12px; font-size: 15px;

@@ -1,13 +1,19 @@
-// Query detail API: one question with its verdict and sources (S5/S7/S8).
+// Query detail API: one question with its verdict, sources, citations,
+// supplier memory, and the recorded outcome for the current browser.
 import { NextResponse } from "next/server";
-import { getQueryDetail } from "../../../../lib/store.mjs";
+import { resolveUser } from "../../../../lib/session.mjs";
+import { getOutcome, getQueryDetail } from "../../../../lib/store.mjs";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-export async function GET(_request, { params }) {
+export async function GET(request, { params }) {
   const { id } = await params;
   const detail = await getQueryDetail(id);
   if (!detail) return NextResponse.json({ error: "not_found" }, { status: 404 });
-  return NextResponse.json(detail);
+  const session = await resolveUser(request);
+  const outcome = detail.verdict
+    ? await getOutcome(detail.verdict.id, session.user.id)
+    : null;
+  return NextResponse.json({ ...detail, outcome });
 }
