@@ -7,8 +7,8 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET() {
-  const user = getLocalUser();
-  return NextResponse.json({ history: listHistory(user.id) });
+  const user = await getLocalUser();
+  return NextResponse.json({ history: await listHistory(user.id) });
 }
 
 export async function POST(request) {
@@ -18,7 +18,7 @@ export async function POST(request) {
     if (!questionText) {
       return NextResponse.json({ error: "empty_question" }, { status: 400 });
     }
-    const user = getLocalUser();
+    const user = await getLocalUser();
     const result = await runQuery({
       userId: user.id,
       questionText,

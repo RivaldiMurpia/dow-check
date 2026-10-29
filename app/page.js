@@ -76,6 +76,10 @@ export default function Home() {
   const recordStreamRef = useRef(null);
   const recordTimerRef = useRef(null);
   const timerRef = useRef(null);
+  const [attachment, setAttachment] = useState(null);
+  const fileInputRef = useRef(null);
+  const [watchItems, setWatchItems] = useState(["Cabai Merah", "Minyak Goreng", "Beras"]);
+  const [newWatchItem, setNewWatchItem] = useState("");
 
   const loadHistory = useCallback(async () => {
     try {
@@ -97,6 +101,38 @@ export default function Home() {
     clearInterval(recordTimerRef.current);
     recordStreamRef.current?.getTracks().forEach((track) => track.stop());
   }, []);
+
+  // Weekly staple watchlist, persisted locally in the browser.
+  useEffect(() => {
+    try {
+      const saved = JSON.parse(window.localStorage.getItem("dow-check-watchlist") || "null");
+      if (Array.isArray(saved) && saved.length) setWatchItems(saved.slice(0, 5));
+    } catch { /* keep defaults */ }
+  }, []);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem("dow-check-watchlist", JSON.stringify(watchItems));
+    } catch { /* storage unavailable */ }
+  }, [watchItems]);
+
+  // Summarize the last 7 days of checks for one watched staple.
+  function weeklySummary(item) {
+    const keyword = item.toLowerCase().split(/\s+/)[0];
+    const since = Date.now() - 7 * 24 * 3600 * 1000;
+    const match = history.find((entry) => {
+      const when = new Date(entry.createdAt).getTime();
+      return when >= since && String(entry.questionText || "").toLowerCase().includes(keyword);
+    });
+    if (!match) return { label: "Belum dicek minggu ini", detail: null, entry: null };
+    const text = String(match.verdictText || "");
+    const trend = /turun/i.test(text) ? "cenderung turun" : /naik/i.test(text) ? "cenderung naik" : "sudah dicek";
+    return {
+      label: `${trend} · ${match.confidence || ""}`.trim(),
+      detail: text.slice(0, 110),
+      entry: match,
+    };
+  }
 
   // Entrance motion for the glass cards (anime.js). Skipped for reduced motion.
   useEffect(() => {
@@ -199,7 +235,7 @@ export default function Home() {
           uncertain: extraction.uncertain || [],
           note: data.message || "",
         });
-      } else {
+      } else if (mediaType === "voice_note") {
         // Live voice fills the question box directly so the user can edit
         // the transcript in place before submitting (no separate panel).
         const text = String(data.transcript || "").trim();
@@ -210,12 +246,97 @@ export default function Home() {
           setError(data.message || "Suaranya belum bisa dibaca. Coba rekam ulang di tempat lebih sepi ya.");
         }
       }
+      return data;
     } catch {
       setError("Upload gagal. Coba lagi ya.");
+      return null;
     } finally {
       setBusy(false);
       setTranscribing(false);
     }
+  }
+
+  // Handle a supporting file picked via the "+" button: images go through
+  // vision extraction, plain-text documents are read as context, and other
+  // documents are attached by name with an honest not-read-yet note.
+  async function handleAttachment(file) {
+    if (!file || busy) return;
+    setError("");
+    const isPdf = file.type === "application/pdf" || /\.pdf$/i.test(file.name);
+    const kind = file.type.startsWith("image/")
+      ? "image"
+      : isPdf
+        ? "pdf"
+        : /text|markdown|csv|json/.test(file.type) || /\.(txt|md|csv)$/i.test(file.name)
+          ? "text"
+          : "file";
+    if (kind === "image") {
+      setAttachment({ name: file.name, kind });
+      await uploadMedia(file, "receipt_photo");
+      return;
+    }
+    if (kind === "pdf") {
+      const data = await uploadMedia(file, "document_pdf");
+      if (data?.documentText) {
+        setAttachment({ name: file.name, kind: "text", text: data.documentText });
+      } else {
+        setAttachment({ name: file.name, kind: "file" });
+        if (data?.message) setError(data.message);
+      }
+      return;
+    }
+    if (kind === "text") {
+      try {
+        const text = (await file.text()).slice(0, 6000);
+        setAttachment({ name: file.name, kind, text });
+      } catch {
+        setError("Dokumennya gagal dibaca. Coba file lain ya.");
+      }
+      return;
+    }
+    setAttachment({ name: file.name, kind });
+  }
+
+  function clearAttachment() {
+    setAttachment(null);
+    setReceipt(null);
+    setComparison(null);
+  }
+
+  // Submit the question together with any attachment context.
+  function submitWithAttachment() {
+    if (receipt) {
+      const context = {
+        shop: receipt.shop,
+        date: receipt.date,
+        items: receipt.itemsText.split("\n").filter(Boolean),
+        attachment: attachment ? { name: attachment.name, kind: attachment.kind } : { kind: "image" },
+      };
+      submit(
+        question.trim() || `Harga di struk dari ${receipt.shop || "toko ini"} normal nggak?`,
+        "photo",
+        context,
+      );
+      setReceipt(null);
+      setAttachment(null);
+      return;
+    }
+    if (attachment?.kind === "text") {
+      submit(question, "text", {
+        attachment: { name: attachment.name, kind: "text" },
+        documentText: attachment.text,
+      });
+      setAttachment(null);
+      return;
+    }
+    if (attachment) {
+      submit(question, "text", {
+        attachment: { name: attachment.name, kind: attachment.kind },
+      });
+      setAttachment(null);
+      return;
+    }
+    submit(question);
   }
 
   // Live microphone recording (MediaRecorder). The recorded clip goes
@@ -459,6 +580,23 @@ export default function Home() {
             onChange={(event) => setQuestion(event.target.value)}
             placeholder="Contoh: Supplier nawarin minyak goreng Rp11.000/liter, aman nggak?"
           />
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*,.pdf,.txt,.md,.csv,.doc,.docx"
+            hidden
+            onChange={(e) => { handleAttachment(e.target.files?.[0]); e.target.value = ""; }}
+          />
+          <button
+            type="button"
+            className="mic-btn attach-btn"
+            disabled={busy || recording}
+            aria-label="Tambah lampiran gambar atau dokumen"
+            title="Tambah lampiran"
+            onClick={() => fileInputRef.current?.click()}
+          >
+            <span className="attach-plus" aria-hidden="true">+</span>
+          </button>
           <button
             type="button"
             className={recording ? "mic-btn recording" : "mic-btn"}
@@ -486,14 +624,25 @@ export default function Home() {
           </p>
         ) : null}
         {transcribing ? <p className="muted" role="status">Lagi nulis hasil suara lo…</p> : null}
+        {attachment ? (
+          <div className="attachment-card">
+            <span className="attachment-name">
+              Lampiran: <b>{attachment.name}</b>
+              {attachment.kind === "text" ? <span className="muted"> · isi dokumen ikut dicek</span> : null}
+              {attachment.kind === "file" ? <span className="muted"> · isi dokumen belum dibaca otomatis, sebutkan isinya di pertanyaan ya</span> : null}
+              {attachment.kind === "image" ? <span className="muted"> · cek hasil bacaannya di bawah</span> : null}
+            </span>
+            <button type="button" className="quiet" onClick={clearAttachment}>Hapus</button>
+          </div>
+        ) : null}
         <div className="row">
-          <button className="primary" disabled={busy || recording || !question.trim()} onClick={() => submit(question)}>
+          <button
+            className="primary"
+            disabled={busy || recording || (!question.trim() && !receipt && !attachment)}
+            onClick={submitWithAttachment}
+          >
             Cek sekarang
           </button>
-          <label className="chip" role="button">
-            Foto struk
-            <input type="file" accept="image/*" hidden onChange={(e) => uploadMedia(e.target.files?.[0], "receipt_photo")} />
-          </label>
         </div>
         <div className="chips">
           {EXAMPLES.map((example) => (
@@ -502,6 +651,58 @@ export default function Home() {
         </div>
         {busy ? <p className="progress" role="status">{PROGRESS_STEPS[progressIndex]}</p> : null}
         {error ? <p role="alert">{error}</p> : null}
+      </section>
+
+      {/* Weekly staple watchlist */}
+      <section className="card">
+        <h2>Pantauan minggu ini</h2>
+        {watchItems.map((item) => {
+          const summary = weeklySummary(item);
+          return (
+            <div key={item} className="watch-row">
+              <div className="watch-main">
+                <b>{item}</b>
+                <span className="muted"> · {summary.label}</span>
+                {summary.detail ? <p className="watch-detail">{summary.detail}…</p> : null}
+              </div>
+              <button type="button" disabled={busy} onClick={() => submit(`Harga ${item.toLowerCase()} minggu ini gimana?`)}>
+                Cek
+              </button>
+              <button
+                type="button"
+                className="quiet"
+                aria-label={`Hapus ${item} dari pantauan`}
+                onClick={() => setWatchItems((items) => items.filter((value) => value !== item))}
+              >
+                ×
+              </button>
+            </div>
+          );
+        })}
+        {watchItems.length < 5 ? (
+          <div className="row">
+            <input
+              type="text"
+              aria-label="Bahan pokok baru"
+              placeholder="Tambah bahan, mis. Gula Pasir"
+              value={newWatchItem}
+              onChange={(event) => setNewWatchItem(event.target.value)}
+            />
+            <button
+              type="button"
+              disabled={!newWatchItem.trim()}
+              onClick={() => {
+                const value = newWatchItem.trim();
+                if (value && !watchItems.includes(value)) {
+                  setWatchItems((items) => [...items, value].slice(0, 5));
+                }
+                setNewWatchItem("");
+              }}
+            >
+              Tambah
+            </button>
+          </div>
+        ) : null}
       </section>
 
       {/* S2: Receipt confirmation */}
@@ -517,11 +718,7 @@ export default function Home() {
           <textarea aria-label="Isi struk" placeholder={"Satu baris per barang, mis.:\nCabai merah 45000"} value={receipt.itemsText}
             onChange={(e) => setReceipt({ ...receipt, itemsText: e.target.value })} />
           <div className="row">
-            <button className="primary" disabled={busy} onClick={() => {
-              const context = { shop: receipt.shop, date: receipt.date, items: receipt.itemsText.split("\n").filter(Boolean) };
-              submit(question.trim() || `Harga di struk dari ${receipt.shop || "toko ini"} normal nggak?`, "photo", context);
-              setReceipt(null);
-            }}>Betul, lanjut</button>
+            <button className="primary" disabled={busy} onClick={submitWithAttachment}>Betul, lanjut</button>
             <button disabled={comparing} onClick={compareReceipt}>
               {comparing ? "Lagi bandingkan…" : "Bandingkan harga pasar"}
             </button>
@@ -550,6 +747,12 @@ export default function Home() {
           <span className={`badge ${verdict.confidence}`}>{STATUS_LABEL[verdict.confidence] || verdict.confidence}</span>
           <p className="verdict">{verdict.verdictText}</p>
           <p className="muted">{verdict.confidenceReason}</p>
+          {result?.supplierMemory ? (
+            <p className="memory-note">
+              Supplier <b>{result.supplierMemory.name}</b> pernah dicek {result.supplierMemory.checkCount}x.
+              Terakhir {String(result.supplierMemory.lastCheckedAt || "").slice(0, 10)} statusnya {result.supplierMemory.lastConfidence}.
+            </p>
+          ) : null}
           {(verdict.riskFlags || []).map((flag) => <p className="risk" key={flag}>⚠ {flag}</p>)}
           <div className="action-box">
             <b>LANGKAH BERIKUTNYA</b>

@@ -3,7 +3,7 @@
 // instead of guessing numbers or audio content (TRD Sections 3.2 and 3.3).
 import { NextResponse } from "next/server";
 import { resolveTranscript } from "../../../lib/engine.mjs";
-import { extractReceipt, hasMetaKey, transcribeAudio } from "../../../lib/providers.mjs";
+import { extractDocument, extractReceipt, hasMetaKey, transcribeAudio } from "../../../lib/providers.mjs";
 import { saveMedia } from "../../../lib/store.mjs";
 
 export const runtime = "nodejs";
@@ -21,7 +21,7 @@ export async function POST(request) {
 
     if (mediaType === "receipt_photo") {
       if (!hasMetaKey()) {
-        const media = saveMedia({ mediaType, extraction: null });
+        const media = await saveMedia({ mediaType, extraction: null });
         return NextResponse.json({
           mediaId: media.id,
           needsManualEntry: true,
@@ -33,13 +33,13 @@ export async function POST(request) {
         base64: buffer.toString("base64"),
         mimeType: file.type || "image/jpeg",
       });
-      const media = saveMedia({ mediaType, extraction: result.extraction });
+      const media = await saveMedia({ mediaType, extraction: result.extraction });
       return NextResponse.json({ mediaId: media.id, needsManualEntry: false, extraction: result.extraction });
     }
 
     if (mediaType === "voice_note") {
       if (!hasMetaKey()) {
-        const media = saveMedia({ mediaType, extraction: null });
+        const media = await saveMedia({ mediaType, extraction: null });
         return NextResponse.json({
           mediaId: media.id,
           needsManualEntry: true,
@@ -60,7 +60,7 @@ export async function POST(request) {
       const resolved = resolveTranscript(result?.text);
       if (!resolved.ok) {
         // Non-speech or unreadable audio must never become an invented transcript.
-        const media = saveMedia({ mediaType, extraction: null });
+        const media = await saveMedia({ mediaType, extraction: null });
         return NextResponse.json({
           mediaId: media.id,
           needsManualEntry: true,
@@ -68,8 +68,44 @@ export async function POST(request) {
           message: resolved.message,
         });
       }
-      const media = saveMedia({ mediaType, extraction: { transcript: resolved.transcript } });
+      const media = await saveMedia({ mediaType, extraction: { transcript: resolved.transcript } });
       return NextResponse.json({ mediaId: media.id, needsManualEntry: false, transcript: resolved.transcript });
+    }
+
+    if (mediaType === "document_pdf") {
+      if (!hasMetaKey()) {
+        const media = await saveMedia({ mediaType, extraction: null });
+        return NextResponse.json({
+          mediaId: media.id,
+          needsManualEntry: true,
+          documentText: "",
+          message: "Meta API key belum terisi, jadi PDF belum bisa dibaca otomatis.",
+        });
+      }
+      let result = null;
+      try {
+        result = await extractDocument({
+          base64: buffer.toString("base64"),
+          filename: file.name || "document.pdf",
+        });
+      } catch {
+        result = null;
+      }
+      if (!result || !result.text) {
+        const media = await saveMedia({ mediaType, extraction: null });
+        return NextResponse.json({
+          mediaId: media.id,
+          needsManualEntry: true,
+          documentText: "",
+          message: "PDF-nya belum bisa dibaca. Coba foto halamannya aja ya.",
+        });
+      }
+      const media = await saveMedia({ mediaType, extraction: { chars: result.text.length } });
+      return NextResponse.json({
+        mediaId: media.id,
+        needsManualEntry: false,
+        documentText: result.text,
+      });
     }
 
     return NextResponse.json({ error: "unsupported_media_type" }, { status: 400 });

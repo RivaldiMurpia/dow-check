@@ -7,7 +7,7 @@ export const dynamic = "force-dynamic";
 
 export async function GET(_request, { params }) {
   const { id } = await params;
-  const detail = getQueryDetail(id);
+  const detail = await getQueryDetail(id);
   if (!detail) return NextResponse.json({ error: "not_found" }, { status: 404 });
   return NextResponse.json(detail);
 }

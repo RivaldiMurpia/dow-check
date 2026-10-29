@@ -171,6 +171,16 @@ button:disabled { opacity: 0.55; cursor: wait; }
 .badge.INSUFFICIENT_EVIDENCE { background: #e9eae4; color: var(--weak); }
 .verdict { font-size: 21px; font-weight: 700; line-height: 1.35; margin: 4px 0 10px; }
 .risk { color: var(--danger); font-weight: 700; margin: 6px 0; }
+.watch-row {
+  display: flex; align-items: flex-start; gap: 8px;
+  padding: 10px 0; border-bottom: 1px solid rgba(120, 130, 115, 0.25);
+}
+.watch-main { flex: 1; min-width: 0; }
+.watch-detail { margin: 3px 0 0; font-size: 14px; color: var(--muted); }
+.memory-note {
+  border: 1px solid rgba(120, 130, 115, 0.4); border-radius: 10px;
+  background: rgba(255, 255, 255, 0.55); padding: 9px 12px; font-size: 15px;
+}
 .action-box {
   border: 1.5px solid var(--action); border-radius: 12px;
   padding: 12px 14px; margin: 12px 0;
@@ -182,9 +192,18 @@ button:disabled { opacity: 0.55; cursor: wait; }
   min-height: 40px; padding: 7px 12px; border-radius: 999px; font-size: 14px;
   background: rgba(255, 255, 255, 0.75); border: 1px solid rgba(120, 130, 115, 0.35); font-weight: 600;
 }
-/* Microphone button inside the question box. */
+/* Attachment (+) and microphone buttons inside the question box. */
 .input-wrap { position: relative; }
-.input-wrap textarea { padding-right: 68px; }
+.input-wrap textarea { padding-right: 124px; }
+.mic-btn.attach-btn { right: 66px; color: var(--ink); }
+.attach-plus { font-size: 26px; font-weight: 400; line-height: 1; }
+.attachment-card {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  border: 1px solid rgba(120, 130, 115, 0.4); border-radius: 12px;
+  background: rgba(255, 255, 255, 0.6);
+  padding: 10px 12px; margin: 10px 0 0;
+}
+.attachment-name { min-width: 0; overflow-wrap: anywhere; }
 .mic-btn {
   position: absolute; right: 10px; bottom: 10px;
   width: 48px; height: 48px; min-height: 48px; padding: 0;

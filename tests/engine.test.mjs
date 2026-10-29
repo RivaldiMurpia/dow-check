@@ -6,6 +6,8 @@ import {
   buildWhatsAppShare,
   classifyQuestion,
   encodeWav,
+  extractSupplierName,
+  supplierKey,
   comparePrice,
   countWords,
   extractPrices,
@@ -125,4 +127,18 @@ test("encodes mono samples as a valid 16 kHz PCM WAV", () => {
   assert.equal(view.getUint32(24, true), 16000);
   assert.equal(view.getUint16(22, true), 1);
   assert.equal(view.getInt16(44 + 2, true), 16383);
+});
+
+test("extracts supplier names for cross-check memory", () => {
+  assert.equal(
+    extractSupplierName("Supplier Toko Sinar Abadi nawarin gula Rp9000, aman nggak?"),
+    "Toko Sinar Abadi",
+  );
+  assert.equal(
+    extractSupplierName("PT Berkah Jaya Sentosa nawarin minyak murah, aman nggak buat transfer?"),
+    "Berkah Jaya Sentosa",
+  );
+  assert.equal(extractSupplierName("Harga cabai naik nggak?"), null);
+  assert.equal(supplierKey("Toko Sinar Abadi!"), "toko sinar abadi");
+  assert.equal(supplierKey("TOKO  Sinar   Abadi"), supplierKey("Toko Sinar Abadi"));
 });
