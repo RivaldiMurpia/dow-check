@@ -62,13 +62,19 @@ export default function Home() {
   const [history, setHistory] = useState([]);
   const [error, setError] = useState("");
   const [receipt, setReceipt] = useState(null);
-  const [transcript, setTranscript] = useState(null);
+  const [transcribing, setTranscribing] = useState(false);
   const [openSource, setOpenSource] = useState(null);
   const [feedbackDone, setFeedbackDone] = useState(false);
   const [comparison, setComparison] = useState(null);
   const [comparing, setComparing] = useState(false);
   const [shareNote, setShareNote] = useState("");
   const [panelOpen, setPanelOpen] = useState(true);
+  const [recording, setRecording] = useState(false);
+  const [recordSeconds, setRecordSeconds] = useState(0);
+  const recorderRef = useRef(null);
+  const recordChunksRef = useRef([]);
+  const recordStreamRef = useRef(null);
+  const recordTimerRef = useRef(null);
   const timerRef = useRef(null);
 
   const loadHistory = useCallback(async () => {
@@ -84,6 +90,12 @@ export default function Home() {
   // Start with the side panel minimized on small screens.
   useEffect(() => {
     if (window.innerWidth < 820) setPanelOpen(false);
+  }, []);
+
+  // Release the microphone and timer if the page goes away mid-recording.
+  useEffect(() => () => {
+    clearInterval(recordTimerRef.current);
+    recordStreamRef.current?.getTracks().forEach((track) => track.stop());
   }, []);
 
   // Entrance motion for the glass cards (anime.js). Skipped for reduced motion.
@@ -163,6 +175,7 @@ export default function Home() {
   async function uploadMedia(file, mediaType) {
     if (!file || busy) return;
     setBusy(true); setError("");
+    if (mediaType === "voice_note") setTranscribing(true);
     try {
       let uploadFile = file;
       if (mediaType === "voice_note" && !/wav/i.test(file.type || file.name || "")) {
@@ -187,12 +200,68 @@ export default function Home() {
           note: data.message || "",
         });
       } else {
-        setTranscript({ text: data.transcript || "", note: data.message || "" });
+        // Live voice fills the question box directly so the user can edit
+        // the transcript in place before submitting (no separate panel).
+        const text = String(data.transcript || "").trim();
+        if (text) {
+          setQuestion(text);
+          document.getElementById("question")?.focus();
+        } else {
+          setError(data.message || "Suaranya belum bisa dibaca. Coba rekam ulang di tempat lebih sepi ya.");
+        }
       }
     } catch {
       setError("Upload gagal. Coba lagi ya.");
     } finally {
       setBusy(false);
+      setTranscribing(false);
+    }
+  }
+
+  // Live microphone recording (MediaRecorder). The recorded clip goes
+  // through the same WAV-conversion and transcription path as an upload.
+  async function startRecording() {
+    if (recording || busy) return;
+    setError("");
+    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") {
+      setError("Browser ini belum mendukung rekam suara. Upload voice note aja ya.");
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      recordStreamRef.current = stream;
+      recordChunksRef.current = [];
+      const recorder = new MediaRecorder(stream);
+      recorderRef.current = recorder;
+      recorder.ondataavailable = (event) => {
+        if (event.data.size > 0) recordChunksRef.current.push(event.data);
+      };
+      recorder.onstop = async () => {
+        clearInterval(recordTimerRef.current);
+        setRecording(false);
+        setRecordSeconds(0);
+        recordStreamRef.current?.getTracks().forEach((track) => track.stop());
+        recordStreamRef.current = null;
+        const blob = new Blob(recordChunksRef.current, { type: recorder.mimeType || "audio/webm" });
+        if (blob.size > 0) {
+          await uploadMedia(new File([blob], "live-voice.webm", { type: blob.type }), "voice_note");
+        }
+      };
+      recorder.start();
+      setRecording(true);
+      setRecordSeconds(0);
+      recordTimerRef.current = setInterval(
+        () => setRecordSeconds((value) => value + 1),
+        1000,
+      );
+    } catch {
+      setError("Izin mic belum diberikan. Izinkan mic di browser, atau upload voice note aja ya.");
+    }
+  }
+
+  function stopRecording() {
+    if (recorderRef.current && recorderRef.current.state !== "inactive") {
+      recorderRef.current.stop();
     }
   }
 
@@ -383,23 +452,47 @@ export default function Home() {
       {/* S1: Ask */}
       <section className="card">
         <label htmlFor="question"><b>Mau cek apa hari ini?</b></label>
-        <textarea
-          id="question"
-          value={question}
-          onChange={(event) => setQuestion(event.target.value)}
-          placeholder="Contoh: Supplier nawarin minyak goreng Rp11.000/liter, aman nggak?"
-        />
+        <div className="input-wrap">
+          <textarea
+            id="question"
+            value={question}
+            onChange={(event) => setQuestion(event.target.value)}
+            placeholder="Contoh: Supplier nawarin minyak goreng Rp11.000/liter, aman nggak?"
+          />
+          <button
+            type="button"
+            className={recording ? "mic-btn recording" : "mic-btn"}
+            disabled={(busy && !recording) || transcribing}
+            aria-label={recording ? "Berhenti merekam" : "Rekam suara dengan mic"}
+            aria-pressed={recording}
+            title={recording ? "Berhenti merekam" : "Rekam suara"}
+            onClick={recording ? stopRecording : startRecording}
+          >
+            {recording ? (
+              <span className="mic-stop" aria-hidden="true" />
+            ) : (
+              <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
+                <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+                <line x1="12" y1="19" x2="12" y2="23" />
+                <line x1="8" y1="23" x2="16" y2="23" />
+              </svg>
+            )}
+          </button>
+        </div>
+        {recording ? (
+          <p className="recording-status" role="status">
+            ● Lagi merekam {String(Math.floor(recordSeconds / 60)).padStart(2, "0")}:{String(recordSeconds % 60).padStart(2, "0")} — ketuk mic lagi buat berhenti.
+          </p>
+        ) : null}
+        {transcribing ? <p className="muted" role="status">Lagi nulis hasil suara lo…</p> : null}
         <div className="row">
-          <button className="primary" disabled={busy || !question.trim()} onClick={() => submit(question)}>
+          <button className="primary" disabled={busy || recording || !question.trim()} onClick={() => submit(question)}>
             Cek sekarang
           </button>
           <label className="chip" role="button">
             Foto struk
             <input type="file" accept="image/*" hidden onChange={(e) => uploadMedia(e.target.files?.[0], "receipt_photo")} />
-          </label>
-          <label className="chip" role="button">
-            Voice note
-            <input type="file" accept="audio/*" hidden onChange={(e) => uploadMedia(e.target.files?.[0], "voice_note")} />
           </label>
         </div>
         <div className="chips">
@@ -448,24 +541,6 @@ export default function Home() {
               ))}
             </div>
           ) : null}
-        </section>
-      ) : null}
-
-      {/* S3: Transcript confirmation */}
-      {transcript ? (
-        <section className="card">
-          <h2>Hasil transkrip suara</h2>
-          {transcript.note ? <p className="muted">{transcript.note}</p> : null}
-          <textarea aria-label="Transkrip" value={transcript.text}
-            onChange={(e) => setTranscript({ ...transcript, text: e.target.value })}
-            placeholder="Ketik pertanyaannya di sini kalau transkripnya kosong." />
-          <div className="row">
-            <button className="primary" disabled={busy || !transcript.text.trim()} onClick={() => {
-              submit(transcript.text, "voice");
-              setTranscript(null);
-            }}>Betul, lanjut</button>
-            <button className="quiet" onClick={() => setTranscript(null)}>Batal</button>
-          </div>
         </section>
       ) : null}
 
