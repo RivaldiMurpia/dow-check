@@ -70,6 +70,7 @@ export default function Home() {
   const [shareNote, setShareNote] = useState("");
   const [outcome, setOutcome] = useState(null);
   const [showAudit, setShowAudit] = useState(false);
+  const [followUp, setFollowUp] = useState(null);
   const [panelOpen, setPanelOpen] = useState(true);
   const [recording, setRecording] = useState(false);
   const [recordSeconds, setRecordSeconds] = useState(0);
@@ -320,27 +321,32 @@ export default function Home() {
         question.trim() || `Harga di struk dari ${receipt.shop || "toko ini"} normal nggak?`,
         "photo",
         context,
+        followUp?.id || null,
       );
       setReceipt(null);
       setAttachment(null);
+      setFollowUp(null);
       return;
     }
     if (attachment?.kind === "text") {
       submit(question, "text", {
         attachment: { name: attachment.name, kind: "text" },
         documentText: attachment.text,
-      });
+      }, followUp?.id || null);
       setAttachment(null);
+      setFollowUp(null);
       return;
     }
     if (attachment) {
       submit(question, "text", {
         attachment: { name: attachment.name, kind: attachment.kind },
-      });
+      }, followUp?.id || null);
       setAttachment(null);
+      setFollowUp(null);
       return;
     }
-    submit(question);
+    submit(question, "text", null, followUp?.id || null);
+    setFollowUp(null);
   }
 
   // Live microphone recording (MediaRecorder). The recorded clip goes
@@ -536,6 +542,7 @@ export default function Home() {
     setQuestion("");
     setOpenSource(null);
     setShareNote("");
+    setFollowUp(null);
     document.getElementById("question")?.focus();
   }
 
@@ -590,12 +597,22 @@ export default function Home() {
       {/* S1: Ask */}
       <section className="card">
         <label htmlFor="question"><b>Mau cek apa hari ini?</b></label>
+        {followUp ? (
+          <div className="followup-banner">
+            <span>
+              Lanjutan soal: <b>{followUp.questionText}</b>
+            </span>
+            <button type="button" className="quiet" onClick={() => setFollowUp(null)}>
+              Batalkan
+            </button>
+          </div>
+        ) : null}
         <div className="input-wrap">
           <textarea
             id="question"
             value={question}
             onChange={(event) => setQuestion(event.target.value)}
-            placeholder="Contoh: Supplier nawarin minyak goreng Rp11.000/liter, aman nggak?"
+            placeholder={followUp ? "Tulis lanjutan lo soal cek sebelumnya…" : "Contoh: Supplier nawarin minyak goreng Rp11.000/liter, aman nggak?"}
           />
           <input
             ref={fileInputRef}
@@ -877,7 +894,16 @@ export default function Home() {
           </div>
           {shareNote ? <p className="muted" role="status">{shareNote}</p> : null}
           <div className="row">
-            <button className="quiet" onClick={() => result?.query && submit(question, "text", null, result.query.id)}>
+            <button
+              className="quiet"
+              onClick={() => {
+                if (!result?.query) return;
+                setFollowUp({ id: result.query.id, questionText: result.query.questionText });
+                setQuestion("");
+                document.getElementById("question")?.focus();
+                window.scrollTo({ top: 0, behavior: "smooth" });
+              }}
+            >
               Tanya lanjutan soal ini
             </button>
             <button className="quiet" onClick={() => { setResult(null); setQuestion(""); }}>
