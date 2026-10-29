@@ -5,7 +5,32 @@
 // User-facing copy is Bahasa Indonesia; code and comments stay in English.
 import { useCallback, useEffect, useRef, useState } from "react";
 import { animate, stagger } from "animejs";
-import { buildWhatsAppShare } from "../lib/engine.mjs";
+import { buildWhatsAppShare, encodeWav } from "../lib/engine.mjs";
+
+// Convert any browser-decodable audio file to a 16 kHz mono WAV blob.
+// This runs client-side so transcription also works on serverless hosting
+// where ffmpeg is unavailable. Returns null when the format cannot decode
+// (e.g. AMR .3gpp in some browsers); the server then handles or degrades it.
+async function fileToWavBlob(file) {
+  try {
+    const arrayBuffer = await file.arrayBuffer();
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    const decodeContext = new AudioCtx();
+    const decoded = await decodeContext.decodeAudioData(arrayBuffer.slice(0));
+    await decodeContext.close();
+    const targetRate = 16000;
+    const offline = new OfflineAudioContext(1, Math.ceil(decoded.duration * targetRate), targetRate);
+    const source = offline.createBufferSource();
+    source.buffer = decoded;
+    source.connect(offline.destination);
+    source.start();
+    const rendered = await offline.startRendering();
+    const samples = rendered.getChannelData(0);
+    return new Blob([encodeWav(samples, targetRate)], { type: "audio/wav" });
+  } catch {
+    return null;
+  }
+}
 
 const REDUCED_MOTION =
   typeof window !== "undefined" &&
@@ -139,8 +164,15 @@ export default function Home() {
     if (!file || busy) return;
     setBusy(true); setError("");
     try {
+      let uploadFile = file;
+      if (mediaType === "voice_note" && !/wav/i.test(file.type || file.name || "")) {
+        const wavBlob = await fileToWavBlob(file);
+        if (wavBlob) {
+          uploadFile = new File([wavBlob], "voice.wav", { type: "audio/wav" });
+        }
+      }
       const form = new FormData();
-      form.append("file", file);
+      form.append("file", uploadFile);
       form.append("mediaType", mediaType);
       const response = await fetch("/api/media", { method: "POST", body: form });
       const data = await response.json();

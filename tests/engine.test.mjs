@@ -5,6 +5,7 @@ import {
   applyCitationGate,
   buildWhatsAppShare,
   classifyQuestion,
+  encodeWav,
   comparePrice,
   countWords,
   extractPrices,
@@ -112,4 +113,16 @@ test("builds an encoded WhatsApp share URL with the full verdict", () => {
   assert.match(text, /Dicek pada 2026-10-29/);
   assert.ok(url.startsWith("https://wa.me/?text="));
   assert.equal(decodeURIComponent(url.slice("https://wa.me/?text=".length)), text);
+});
+
+test("encodes mono samples as a valid 16 kHz PCM WAV", () => {
+  const samples = new Float32Array([0, 0.5, -0.5, 1, -1]);
+  const wav = encodeWav(samples, 16000);
+  assert.equal(wav.length, 44 + samples.length * 2);
+  assert.equal(String.fromCharCode(...wav.slice(0, 4)), "RIFF");
+  assert.equal(String.fromCharCode(...wav.slice(8, 12)), "WAVE");
+  const view = new DataView(wav.buffer, wav.byteOffset, wav.byteLength);
+  assert.equal(view.getUint32(24, true), 16000);
+  assert.equal(view.getUint16(22, true), 1);
+  assert.equal(view.getInt16(44 + 2, true), 16383);
 });
