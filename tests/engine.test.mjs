@@ -3,9 +3,13 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   applyCitationGate,
+  buildWhatsAppShare,
   classifyQuestion,
+  comparePrice,
   countWords,
+  extractPrices,
   gradeConfidence,
+  pickMarketPrice,
   resolveTranscript,
   QUESTION_KINDS,
 } from "../lib/engine.mjs";
@@ -79,4 +83,33 @@ test("empty transcription falls back to manual entry, never invented text", () =
   const resolved = resolveTranscript("  Harga cabai naik nggak?  ");
   assert.equal(resolved.ok, true);
   assert.equal(resolved.transcript, "Harga cabai naik nggak?");
+});
+
+test("extracts rupiah prices and compares them against the market", () => {
+  assert.deepEqual(extractPrices("Cabai Rp45.000 per kg, bawang Rp 30rb"), [45000, 30000]);
+  assert.equal(pickMarketPrice(["Harga Rp40.000", "Harga Rp44.000", "Harga Rp42.000"]), 42000);
+  assert.equal(pickMarketPrice(["tidak ada angka di sini"]), null);
+  // Bulk-pack outliers far from the receipt price are discarded first.
+  assert.equal(
+    pickMarketPrice(["Rp38.000", "Rp323.000 satu dus", "Rp41.000"], 38500),
+    41000,
+  );
+  assert.equal(comparePrice(45000, 42000), "fair");
+  assert.equal(comparePrice(55000, 42000), "above_market");
+  assert.equal(comparePrice(30000, 42000), "below_market");
+  assert.equal(comparePrice(45000, null), "no_benchmark");
+});
+
+test("builds an encoded WhatsApp share URL with the full verdict", () => {
+  const { text, url } = buildWhatsAppShare({
+    statusLabel: "SEDANG — hati-hati ya.",
+    verdictText: "Harga cabai naik minggu ini.",
+    nextAction: "Stok secukupnya untuk 3 hari.",
+    checkedAt: "2026-10-29T03:59:05.509Z",
+  });
+  assert.match(text, /DOW Check/);
+  assert.match(text, /Harga cabai naik/);
+  assert.match(text, /Dicek pada 2026-10-29/);
+  assert.ok(url.startsWith("https://wa.me/?text="));
+  assert.equal(decodeURIComponent(url.slice("https://wa.me/?text=".length)), text);
 });

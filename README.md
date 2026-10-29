@@ -4,6 +4,8 @@ Proof-first research assistant for Indonesian small merchants (repository: `dow-
 
 Built for the Meta Global AI Developer Hackathon (Indie track, Build for Your World). The verdict engine uses the Meta Model API (Muse Spark, plus Muse Voice Transcribe for voice notes) behind a deterministic citation gate: no claim is rendered without a source, and confidence is graded by code, not by model vibes.
 
+Verdicts can be shared to WhatsApp as text or as a downloadable card image, past checks can be re-run as new linked entries without overwriting history, and confirmed receipt items can be compared automatically against current market sources (with an honest "no benchmark" when nothing plausible is found).
+
 ## Run it
 
 ```bash

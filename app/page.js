@@ -5,6 +5,7 @@
 // User-facing copy is Bahasa Indonesia; code and comments stay in English.
 import { useCallback, useEffect, useRef, useState } from "react";
 import { animate, stagger } from "animejs";
+import { buildWhatsAppShare } from "../lib/engine.mjs";
 
 const REDUCED_MOTION =
   typeof window !== "undefined" &&
@@ -39,6 +40,10 @@ export default function Home() {
   const [transcript, setTranscript] = useState(null);
   const [openSource, setOpenSource] = useState(null);
   const [feedbackDone, setFeedbackDone] = useState(false);
+  const [comparison, setComparison] = useState(null);
+  const [comparing, setComparing] = useState(false);
+  const [shareNote, setShareNote] = useState("");
+  const [panelOpen, setPanelOpen] = useState(true);
   const timerRef = useRef(null);
 
   const loadHistory = useCallback(async () => {
@@ -50,6 +55,11 @@ export default function Home() {
   }, []);
 
   useEffect(() => { loadHistory(); }, [loadHistory]);
+
+  // Start with the side panel minimized on small screens.
+  useEffect(() => {
+    if (window.innerWidth < 820) setPanelOpen(false);
+  }, []);
 
   // Entrance motion for the glass cards (anime.js). Skipped for reduced motion.
   useEffect(() => {
@@ -154,6 +164,114 @@ export default function Home() {
     }
   }
 
+  // Wrap text on a canvas context; returns the y of the last drawn line.
+  function wrapText(ctx, text, x, y, maxWidth, lineHeight) {
+    const words = String(text || "").split(/\s+/);
+    let line = "";
+    let currentY = y;
+    for (const word of words) {
+      const test = line ? `${line} ${word}` : word;
+      if (ctx.measureText(test).width > maxWidth && line) {
+        ctx.fillText(line, x, currentY);
+        line = word;
+        currentY += lineHeight;
+      } else {
+        line = test;
+      }
+    }
+    if (line) ctx.fillText(line, x, currentY);
+    return currentY;
+  }
+
+  // Share data for the verdict: a real anchor is used for WhatsApp because
+  // popup blockers can silently kill window.open. Copy is the explicit fallback.
+  function shareData() {
+    if (!verdict) return { text: "", url: "#" };
+    return buildWhatsAppShare({
+      statusLabel: STATUS_LABEL[verdict.confidence] || verdict.confidence,
+      verdictText: verdict.verdictText,
+      nextAction: verdict.nextAction,
+      checkedAt: result?.query?.createdAt,
+    });
+  }
+
+  async function copyShareText() {
+    try {
+      await navigator.clipboard.writeText(shareData().text);
+      setShareNote("Teks verdict udah disalin — tempel di WhatsApp ya.");
+    } catch {
+      setShareNote("Gagal menyalin otomatis. Salin manual teks verdict-nya ya.");
+    }
+  }
+
+  // Render a shareable verdict card image with the native canvas API.
+  function downloadCard() {
+    if (!verdict) return;
+    const canvas = document.createElement("canvas");
+    canvas.width = 1080;
+    canvas.height = 1080;
+    const ctx = canvas.getContext("2d");
+    ctx.fillStyle = "#eef4ec";
+    ctx.fillRect(0, 0, 1080, 1080);
+    ctx.fillStyle = "#ffffff";
+    ctx.beginPath();
+    ctx.roundRect(60, 60, 960, 960, 36);
+    ctx.fill();
+    ctx.fillStyle = "#14532d";
+    ctx.font = "800 44px system-ui, sans-serif";
+    ctx.fillText("DOW Check", 110, 160);
+    ctx.fillStyle = "#1c1e1a";
+    ctx.font = "700 40px system-ui, sans-serif";
+    const statusText = STATUS_LABEL[verdict.confidence] || verdict.confidence;
+    wrapText(ctx, statusText, 110, 250, 860, 52);
+    ctx.font = "400 38px system-ui, sans-serif";
+    const verdictEnd = wrapText(ctx, verdict.verdictText, 110, 390, 860, 54);
+    ctx.fillStyle = "#14532d";
+    ctx.font = "700 34px system-ui, sans-serif";
+    ctx.fillText("Langkah berikutnya:", 110, verdictEnd + 70);
+    ctx.fillStyle = "#1c1e1a";
+    ctx.font = "400 36px system-ui, sans-serif";
+    wrapText(ctx, verdict.nextAction, 110, verdictEnd + 130, 860, 52);
+    ctx.fillStyle = "#5b6056";
+    ctx.font = "400 28px system-ui, sans-serif";
+    ctx.fillText(`Dicek pada ${String(result.query?.createdAt || "").slice(0, 10)}`, 110, 950);
+    const link = document.createElement("a");
+    link.download = "dow-check-verdict.png";
+    link.href = canvas.toDataURL("image/png");
+    link.click();
+  }
+
+  // Compare confirmed receipt items against current market sources.
+  async function compareReceipt() {
+    if (!receipt || comparing) return;
+    const items = receipt.itemsText
+      .split("\n")
+      .map((line) => {
+        const match = line.match(/^(.*?)\s+(\d{4,})$/);
+        return match ? { name: match[1].trim(), price: Number(match[2]) } : null;
+      })
+      .filter(Boolean);
+    if (!items.length) {
+      setError("Isi struknya pakai format: NamaBarang Harga. Contoh: Cabai Merah 45000");
+      return;
+    }
+    setComparing(true); setError("");
+    try {
+      const response = await fetch("/api/compare", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ items }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "failed");
+      setComparison(data.comparisons || []);
+    } catch {
+      setError("Bandingkan harga lagi gangguan. Coba lagi sebentar ya.");
+    } finally {
+      setComparing(false);
+    }
+  }
+
   async function sendFeedback(helpful) {
     if (!result?.verdict) return;
     await fetch("/api/feedback", {
@@ -174,8 +292,59 @@ export default function Home() {
   const verdict = result?.verdict;
   const sources = result?.sources || [];
 
+  function startNewCheck() {
+    setResult(null);
+    setQuestion("");
+    setOpenSource(null);
+    setShareNote("");
+    document.getElementById("question")?.focus();
+  }
+
   return (
-    <main className="shell">
+    <div className="layout">
+      {/* Side panel: new check + history (S7), minimizable */}
+      <button
+        type="button"
+        className="panel-toggle"
+        aria-label={panelOpen ? "Tutup panel" : "Buka panel riwayat"}
+        aria-expanded={panelOpen}
+        onClick={() => setPanelOpen((value) => !value)}
+      >
+        {panelOpen ? "«" : "☰"}
+      </button>
+      <aside className={`sidebar${panelOpen ? "" : " minimized"}`} aria-label="Panel riwayat cek">
+        <div className="sidebar-head">
+          <span className="sidebar-brand">DOW Check</span>
+          <span className="sidebar-path">/cek</span>
+        </div>
+        <button type="button" className="new-check-btn" onClick={startNewCheck}>
+          + Cek baru
+        </button>
+        <p className="sidebar-label">RIWAYAT CEK</p>
+        <div className="sidebar-history">
+          {history.length ? history.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              className="history-item"
+              onClick={() => { openHistory(item.id); if (window.innerWidth < 820) setPanelOpen(false); }}
+            >
+              <span className="history-q">{item.questionText}</span>
+              <span className="muted history-meta">
+                {String(item.createdAt).slice(0, 10)}{item.confidence ? ` · ${item.confidence}` : ""}
+              </span>
+            </button>
+          )) : (
+            <div className="history-empty">
+              <span className="history-empty-icon" aria-hidden="true">▤</span>
+              <p>Belum ada riwayat cek.</p>
+              <p>Tanya apa aja buat mulai cek.</p>
+            </div>
+          )}
+        </div>
+      </aside>
+
+      <main className="shell">
       <h1 className="brand">DOW Check</h1>
       <p className="tagline">Cek dulu, baru putuskan. Jawaban kecil, buktinya bisa dicek.</p>
 
@@ -228,8 +397,25 @@ export default function Home() {
               submit(question.trim() || `Harga di struk dari ${receipt.shop || "toko ini"} normal nggak?`, "photo", context);
               setReceipt(null);
             }}>Betul, lanjut</button>
+            <button disabled={comparing} onClick={compareReceipt}>
+              {comparing ? "Lagi bandingkan…" : "Bandingkan harga pasar"}
+            </button>
             <button className="quiet" onClick={() => setReceipt(null)}>Batal</button>
           </div>
+          {comparison ? (
+            <div>
+              <h3>Hasil bandingan pasar</h3>
+              {comparison.map((row) => (
+                <p key={row.name}>
+                  <b>{row.name}</b> — Struk Rp{Number(row.receiptPrice || 0).toLocaleString("id-ID")}
+                  {row.marketPrice
+                    ? <> · Pasar Rp{Number(row.marketPrice).toLocaleString("id-ID")} · <b>{row.status === "above_market" ? "Lebih mahal dari pasar" : row.status === "below_market" ? "Lebih murah dari pasar" : "Masih wajar"}</b></>
+                    : <> · <b>Belum ada pembanding pasar</b></>}
+                  {row.sources?.[0] ? <> · <a href={row.sources[0].url} target="_blank" rel="noreferrer">{row.sources[0].publisher}</a></> : null}
+                </p>
+              ))}
+            </div>
+          ) : null}
         </section>
       ) : null}
 
@@ -286,6 +472,23 @@ export default function Home() {
             {feedbackDone ? <span className="muted">Makasih ya.</span> : null}
           </div>
           <div className="row">
+            <a
+              className="share-btn"
+              href={shareData().url}
+              target="_blank"
+              rel="noreferrer"
+              onClick={() => setShareNote("Membuka WhatsApp… Kalau tab baru tidak muncul, browser lo nahan wa.me — pakai tombol Salin teks ya.")}
+            >
+              Bagikan ke WhatsApp
+            </a>
+            <button onClick={copyShareText}>Salin teks</button>
+            <button onClick={downloadCard}>Unduh kartu verdict</button>
+            <button disabled={busy} onClick={() => result?.query && submit(result.query.questionText, result.query.inputMode, result.query.context, result.query.id)}>
+              Cek ulang
+            </button>
+          </div>
+          {shareNote ? <p className="muted" role="status">{shareNote}</p> : null}
+          <div className="row">
             <button className="quiet" onClick={() => result?.query && submit(question, "text", null, result.query.id)}>
               Tanya lanjutan soal ini
             </button>
@@ -297,16 +500,7 @@ export default function Home() {
         </section>
       ) : null}
 
-      {/* S7: History */}
-      <section className="card">
-        <h2>Riwayat cek</h2>
-        {history.length ? history.map((item) => (
-          <button key={item.id} className="history-item" onClick={() => openHistory(item.id)}>
-            {item.questionText}
-            <span className="muted"> · {String(item.createdAt).slice(0, 10)}{item.confidence ? ` · ${item.confidence}` : ""}</span>
-          </button>
-        )) : <p className="muted">Belum ada riwayat. Coba cek satu hal di atas ya.</p>}
-      </section>
-    </main>
+      </main>
+    </div>
   );
 }
